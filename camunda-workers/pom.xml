@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- =====================================================================
+         camunda-workers — все @JobWorker компоненты + BPMN-файлы
+         Отдельный модуль, чтобы изолировать логику Camunda-процессов.
+         Общается с booking-service и resource-service через Feign / Kafka.
+    ====================================================================== -->
+
+    <parent>
+        <groupId>com.booking</groupId>
+        <artifactId>booking-platform</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>camunda-workers</artifactId>
+    <name>Camunda Workers</name>
+
+    <dependencies>
+
+        <!-- ── Internal ───────────────────────────────────────────────── -->
+        <dependency>
+            <groupId>com.booking</groupId>
+            <artifactId>booking-core</artifactId>
+        </dependency>
+
+        <!-- ── Camunda 8 — главная зависимость этого модуля ─────────── -->
+        <dependency>
+            <groupId>io.camunda</groupId>
+            <artifactId>spring-boot-starter-camunda-sdk</artifactId>
+        </dependency>
+
+        <!-- ── Web (нужен для health endpoint и Feign-клиентов) ──────── -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+
+        <!-- ── OpenFeign — HTTP-клиенты к booking-service/resource-service -->
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-openfeign</artifactId>
+        </dependency>
+
+        <!-- ── Kafka — публикация событий из воркеров ────────────────── -->
+        <dependency>
+            <groupId>org.springframework.kafka</groupId>
+            <artifactId>spring-kafka</artifactId>
+        </dependency>
+
+        <!-- ── Retry — @Retryable для воркеров при временных сбоях ───── -->
+        <dependency>
+            <groupId>org.springframework.retry</groupId>
+            <artifactId>spring-retry</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-aspects</artifactId>
+        </dependency>
+
+        <!-- ── Actuator ───────────────────────────────────────────────── -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
+        <!-- ── Testing ────────────────────────────────────────────────── -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.awaitility</groupId>
+            <artifactId>awaitility</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>

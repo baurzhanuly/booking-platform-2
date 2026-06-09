@@ -1,0 +1,28 @@
+# Maven
+target/
+*.class
+*.jar
+*.war
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.iws
+*.ipr
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Spring Boot
+*.log
+logs/
+
+# Docker volumes (не коммитим данные БД)
+docker/volumes/
+
+# Sensitive configs (используйте .env или Vault)
+**/application-prod.yml
+**/application-secret.yml
+.env

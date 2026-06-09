@@ -1,0 +1,234 @@
+version: '3.9'
+
+# =============================================================================
+# Booking Platform — Infrastructure Stack
+# Запуск: docker-compose up -d
+# Camunda Operate UI:  http://localhost:8081  (demo/demo)
+# Keycloak Admin:      http://localhost:8080  (admin/admin)
+# Kafka UI:            http://localhost:8090
+# Grafana:             http://localhost:3000  (admin/admin)
+# =============================================================================
+
+services:
+
+  # ── PostgreSQL — booking-service DB ──────────────────────────────────────
+  postgres-booking:
+    image: postgres:16-alpine
+    container_name: postgres-booking
+    environment:
+      POSTGRES_DB: booking_db
+      POSTGRES_USER: booking_user
+      POSTGRES_PASSWORD: booking_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_booking_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U booking_user -d booking_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - booking-net
+
+  # ── PostgreSQL — resource-service DB ─────────────────────────────────────
+  postgres-resource:
+    image: postgres:16-alpine
+    container_name: postgres-resource
+    environment:
+      POSTGRES_DB: resource_db
+      POSTGRES_USER: resource_user
+      POSTGRES_PASSWORD: resource_pass
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_resource_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U resource_user -d resource_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - booking-net
+
+  # ── Redis ─────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - booking-net
+
+  # ── Keycloak ──────────────────────────────────────────────────────────────
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0.4
+    container_name: keycloak
+    command: start-dev --import-realm
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres-booking:5432/booking_db
+      KC_DB_USERNAME: booking_user
+      KC_DB_PASSWORD: booking_pass
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_HTTP_PORT: 8080
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json
+    depends_on:
+      postgres-booking:
+        condition: service_healthy
+    networks:
+      - booking-net
+
+  # ── Zookeeper (для Kafka) ─────────────────────────────────────────────────
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - booking-net
+
+  # ── Apache Kafka ──────────────────────────────────────────────────────────
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    networks:
+      - booking-net
+
+  # ── Kafka UI (провер топики, сообщения) ──────────────────────────────────
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    depends_on:
+      - kafka
+    ports:
+      - "8090:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+    networks:
+      - booking-net
+
+  # ── Camunda 8 — Zeebe broker ──────────────────────────────────────────────
+  zeebe:
+    image: camunda/zeebe:8.5.0
+    container_name: zeebe
+    ports:
+      - "26500:26500"   # gRPC — воркеры подключаются сюда
+      - "9600:9600"     # monitoring
+    environment:
+      ZEEBE_BROKER_EXPORTERS_ELASTICSEARCH_CLASSNAME: io.camunda.zeebe.exporter.ElasticsearchExporter
+      ZEEBE_BROKER_EXPORTERS_ELASTICSEARCH_ARGS_URL: http://elasticsearch:9200
+      ZEEBE_BROKER_EXPORTERS_ELASTICSEARCH_ARGS_BULK_SIZE: 1
+    depends_on:
+      - elasticsearch
+    networks:
+      - booking-net
+
+  # ── Elasticsearch (для Camunda Operate) ───────────────────────────────────
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.0
+    container_name: elasticsearch
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: 'false'
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - booking-net
+
+  # ── Camunda Operate (UI для просмотра процессов) ──────────────────────────
+  operate:
+    image: camunda/operate:8.5.0
+    container_name: operate
+    ports:
+      - "8081:8080"
+    environment:
+      CAMUNDA_OPERATE_ZEEBE_GATEWAYADDRESS: zeebe:26500
+      CAMUNDA_OPERATE_ELASTICSEARCH_URL: http://elasticsearch:9200
+      SPRING_PROFILES_ACTIVE: dev
+    depends_on:
+      - zeebe
+      - elasticsearch
+    networks:
+      - booking-net
+
+  # ── Prometheus ────────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    networks:
+      - booking-net
+
+  # ── Grafana ───────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - booking-net
+
+  # ── Zipkin (distributed tracing) ─────────────────────────────────────────
+  zipkin:
+    image: openzipkin/zipkin:3.3
+    container_name: zipkin
+    ports:
+      - "9411:9411"
+    networks:
+      - booking-net
+
+# ── Volumes ───────────────────────────────────────────────────────────────
+volumes:
+  postgres_booking_data:
+  postgres_resource_data:
+  redis_data:
+  elasticsearch_data:
+  grafana_data:
+
+# ── Network ───────────────────────────────────────────────────────────────
+networks:
+  booking-net:
+    driver: bridge
